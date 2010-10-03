@@ -24,28 +24,43 @@ my  $DBH = {};
           options:
             RaiseError: 1
             PrintError: 1
-    
+
     # Important Note! We have reversed our policy so that D::P::DBIC will not
     # assume to automatically generate your DBIx-Class Classes, to enable DBIx-Class
     # generation, please use the following configuration
+
     plugins:
       DBIC:
         foo:
           generate: 1
-    
+
     # Dancer Code File
     use Dancer;
     use Dancer::Plugin::DBIC;
 
+    # Note! You can also declare your connection information with the
+    # following syntax:
+    plugings:
+      DBIC:
+        foo:
+          pckg: Foo::Bar
+          connect_info:
+            - dbi:mysql:db_foo
+            - root
+            - ***
+            -
+              RaiseError: 1
+              PrintError: 1
+
     # Calling the `foo` dsn keyword will return a L<DBIx::Class> instance using
     # the database connection specifications associated with the dsn keyword
     # within the Dancer configuration file.
-    
+
     get '/profile/:id' => sub {
         my $users_rs = foo->resultset('Users')->search({
             user_id => params->{id}
         });
-        
+
         template 'user_profile', { user_data => $user_rs->next };
     };
 
@@ -94,31 +109,49 @@ dsn in list form, i.e. dbi:SQLite:dbname=./foo.db, $user, $pass, $options.
 foreach my $keyword (keys %{ $cfg }) {
     register $keyword => sub {
         my @dsn = ();
-        
+
         $cfg->{$keyword}->{pckg} =~ s/\-/::/g;
-        
-        push @dsn, $cfg->{$keyword}->{dsn}      if $cfg->{$keyword}->{dsn};
-        push @dsn, $cfg->{$keyword}->{user}     if $cfg->{$keyword}->{user};
-        push @dsn, $cfg->{$keyword}->{pass}     if $cfg->{$keyword}->{pass};
-        
-        make_schema_at(
-            $cfg->{$keyword}->{pckg},
-            {},
-            [ @dsn ],
-        ) if $cfg->{$keyword}->{generate} == 1;
-        
-        push @dsn, $cfg->{$keyword}->{options}  if $cfg->{$keyword}->{options};
-        
+
+        if ( $cfg->{$keyword}->{connect_info} ) {
+            push @dsn, @{ $cfg->{$keyword}->{connect_info} };
+        }
+        else {
+            push @dsn, $cfg->{$keyword}->{dsn}  if $cfg->{$keyword}->{dsn};
+            push @dsn, $cfg->{$keyword}->{user} if $cfg->{$keyword}->{user};
+            push @dsn, $cfg->{$keyword}->{pass} if $cfg->{$keyword}->{pass};
+            push @dsn, $cfg->{$keyword}->{options}
+              if $cfg->{$keyword}->{options};
+        }
+
+        # make_schema_at(
+        #     $cfg->{$keyword}->{pckg},
+        #     {},
+        #     [ @dsn ],
+        # ) if $cfg->{$keyword}->{generate} == 1;
+
+        if ( exists $cfg->{$keyword}->{generate} && $cfg->{$keyword}->{generate} == 1 ) {
+            make_schema_at( $cfg->{$keyword}->{pckg}, {}, [@dsn], );
+        }
+        else {
+            my $package = $cfg->{$keyword}->{pckg};
+            eval "use $package";
+            if ( my $err = $@ ) {
+                die "error while loading "
+                  . $cfg->{$keyword}->{pckg} . " : "
+                  . $err;
+            }
+        }
+
         my  $variable = lc $cfg->{$keyword}->{pckg};
             $variable =~ s/::/\-/g;
-            
+
         my  $package  = $cfg->{$keyword}->{pckg};
-        
+
         unless ( $Dancer::Plugin::DBIC::DBH->{$keyword}->{$variable} ) {
             $Dancer::Plugin::DBIC::DBH->{$keyword}->{$variable} =
             $package->connect(@dsn);
         }
-        
+
         return $Dancer::Plugin::DBIC::DBH->{$keyword}->{$variable};
     };
 }
